@@ -1,0 +1,6 @@
+{
+  "type": "jev",
+  "upstream": "openrouter",
+  "api_key_env": "OR_API_KEY_TWO",
+  "prefix": "or"
+}

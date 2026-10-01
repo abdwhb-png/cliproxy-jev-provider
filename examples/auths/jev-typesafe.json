@@ -1,0 +1,6 @@
+{
+  "type": "jev",
+  "upstream": "typesafe",
+  "api_key_env": "TYPESAFE_API_KEY",
+  "prefix": "typesafe"
+}

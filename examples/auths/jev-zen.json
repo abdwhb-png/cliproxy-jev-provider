@@ -1,0 +1,9 @@
+{
+  "type": "jev",
+  "upstream": "zen",
+  "api_key_env": "OPENCODE_KEY_CREDITS",
+  "headers_env": {
+    "x-opencode-session": "OPENCODE_SESSION_KEY_CREDITS"
+  },
+  "prefix": "ocz"
+}
