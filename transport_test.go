@@ -43,6 +43,7 @@ func TestHostJEVTransport(t *testing.T) {
 		}
 	}
 	cancelStarted, cancelObserved := make(chan struct{}), make(chan struct{})
+	browserStarted, browserCancelled := make(chan struct{}, 1), make(chan struct{}, 1)
 	const nativeResponse = `{"model":"jev-1.13.0","answers":{"urgent":{"type":"noul","noul":0.9}},"usage":{"input_tokens":12,"output_tokens":3}}`
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var payload map[string]json.RawMessage
@@ -51,6 +52,25 @@ func TestHostJEVTransport(t *testing.T) {
 		}
 		observed <- upstreamRequest{payload, r.Header.Get("Authorization"), r.URL.Path}
 		w.Header().Set("Content-Type", "application/json")
+		if string(payload["state"]) == `"browser-cancel"` {
+			browserStarted <- struct{}{}
+			<-r.Context().Done()
+			browserCancelled <- struct{}{}
+			return
+		}
+		if string(payload["state"]) == `"browser-error"` {
+			w.WriteHeader(422)
+			return
+		}
+		if bytes.Contains(payload["state"], []byte(`"browser-html"`)) {
+			_, _ = io.WriteString(w, strings.TrimSuffix(nativeResponse, "}")+`,"id":9007199254740993,"note":"</pre><img src=x onerror=window.__jevXSS=true>"}`)
+			return
+		}
+		var browserQuestions map[string]json.RawMessage
+		if json.Unmarshal(payload["questions"], &browserQuestions) == nil && len(browserQuestions) == 3 {
+			_, _ = io.WriteString(w, `{"model":"jev-1.13","answers":{"urgent":{"type":"noul","noul":0.9},"team":{"type":"choice","choice":"billing","confidence":0.8,"probabilities":{"billing":0.8,"support":0.2}},"severity":{"type":"score","score":0.2,"confidence":0.8,"probabilities":{"0":0.8,"1":0.1,"2":0.1}}},"usage":{"input_tokens":12,"output_tokens":3}}`)
+			return
+		}
 		if r.URL.Path == "/chat/completions" {
 			_, _ = io.WriteString(w, `{"id":"mock","object":"chat.completion","model":"unrelated-chat","choices":[{"index":0,"message":{"role":"assistant","content":"normal chat"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}`)
 			return
@@ -219,6 +239,34 @@ debug: false
 	for _, model := range []string{"or/jev-1.13", "ocz/jev-1.13", "ocz/jev-1.13-free", "jev-1.13"} {
 		waitForModel(t, baseURL, model, filepath.Join(temp, "host.log"))
 	}
+	t.Run("browser resources", func(t *testing.T) {
+		request, _ := http.NewRequest(http.MethodGet, baseURL+"/v8/management/plugins", nil)
+		request.Header.Set("Authorization", "Bearer fake-management-key")
+		response, err := client.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		catalog, err := io.ReadAll(response.Body)
+		_ = response.Body.Close()
+		if err != nil || response.StatusCode != 200 || !bytes.Contains(catalog, []byte("JEV Decision Tester")) {
+			t.Fatalf("plugin menu missing: %d %s", response.StatusCode, catalog)
+		}
+		for _, asset := range []struct{ path, contentType string }{
+			{"/tester", "text/html; charset=utf-8"},
+			{"/tester.js", "text/javascript; charset=utf-8"},
+			{"/tester.css", "text/css; charset=utf-8"},
+		} {
+			response, err := client.Get(baseURL + "/v0/resource/plugins/cliproxy-jev-provider" + asset.path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, err := io.ReadAll(response.Body)
+			_ = response.Body.Close()
+			if err != nil || response.StatusCode != 200 || response.Header.Get("Content-Type") != asset.contentType || len(body) == 0 {
+				t.Fatalf("resource %s failed: %d", asset.path, response.StatusCode)
+			}
+		}
+	})
 	t.Run("usage is accounted once", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -369,6 +417,22 @@ debug: false
 			t.Fatal("host ignored quota cooldown")
 		}
 	})
+	if os.Getenv("JEV_TEST_BROWSER") == "1" {
+		t.Run("browser tester", func(t *testing.T) {
+			testBrowserTester(t, baseURL, browserStarted, browserCancelled)
+			if len(observed) != 5 {
+				t.Fatalf("expected exactly five browser upstream calls, got %d", len(observed))
+			}
+			first := nextRequest(t)
+			if string(first.Payload["state"]) != `{"ticket":"browser-html","value":9007199254740993}` ||
+				string(first.Payload["questions"]) != `{"urgent":{"type":"noul","instructions":{"question":"Urgent?"}}}` {
+				t.Fatalf("browser changed native fields: %s %s", first.Payload["state"], first.Payload["questions"])
+			}
+			for len(observed) > 0 {
+				nextRequest(t)
+			}
+		})
+	}
 }
 
 func postTestJSON(t *testing.T, client *http.Client, endpoint string, body []byte) (int, []byte) {

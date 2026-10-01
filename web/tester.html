@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>JEV Decision Tester</title>
+  <link rel="stylesheet" href="tester.css">
+  <script src="tester.js" defer></script>
+</head>
+<body>
+  <main>
+    <header>
+      <p class="eyebrow">JEV · Native decisions</p>
+      <h1>JEV Decision Tester</h1>
+      <p>Supply state and typed questions. Inspect the native answer without a chat wrapper.</p>
+    </header>
+    <section aria-labelledby="connection-heading">
+      <h2 id="connection-heading">Connection</h2>
+      <label for="api-key">CLIProxyAPI client API key</label>
+      <div class="connection">
+        <input id="api-key" type="password" autocomplete="off" spellcheck="false" placeholder="Client key, not an upstream provider key">
+        <button id="load-models" type="button">Load models / Refresh</button>
+      </div>
+      <p class="hint">The key stays in this page’s memory and is cleared on reload.</p>
+      <h3>Available JEV aliases</h3>
+      <ul id="models" aria-label="Available JEV aliases"></ul>
+    </section>
+    <div class="workspace">
+      <section aria-labelledby="request-heading">
+        <h2 id="request-heading">Request</h2>
+        <div class="examples">
+          <label for="example-kind">Synthetic example</label>
+          <select id="example-kind">
+            <option value="all">All three question types</option>
+            <option value="noul">Noul · yes / no</option>
+            <option value="choice">Choice · category</option>
+            <option value="score">Score · ordered levels</option>
+          </select>
+          <button id="load-example" type="button" disabled>Load example</button>
+        </div>
+        <p class="hint">Loading an example replaces the editor contents. Edit its model to use another available alias.</p>
+        <label for="request">Native JSON body</label>
+        <textarea id="request" spellcheck="false" placeholder="Load models, then load an example or paste your full JSON request."></textarea>
+        <div class="actions">
+          <button id="run" class="primary" type="button" disabled>Run decision</button>
+          <button id="cancel" type="button" disabled>Cancel</button>
+        </div>
+      </section>
+      <section aria-labelledby="response-heading">
+        <h2 id="response-heading">Response</h2>
+        <p id="status" role="status" aria-live="polite">Enter a client key and load models.</p>
+        <pre id="response" tabindex="0" aria-label="Native response body"></pre>
+      </section>
+    </div>
+  </main>
+</body>
+</html>

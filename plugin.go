@@ -16,9 +16,10 @@ import (
 )
 
 type jevPlugin struct {
-	callHost  func(string, []byte) ([]byte, error)
-	mu        sync.RWMutex
-	endpoints map[string]string
+	callHost     func(string, []byte) ([]byte, error)
+	mu           sync.RWMutex
+	endpoints    map[string]string
+	resourceBase string
 }
 
 func (p *jevPlugin) handle(method string, raw []byte) ([]byte, error) {
@@ -83,15 +84,15 @@ func (p *jevPlugin) dispatch(method string, raw []byte) (any, error) {
 		}{
 			SchemaVersion: pluginabi.SchemaVersion,
 			Metadata: pluginapi.Metadata{
-				Name: "JEV Provider", Version: "0.1.0", Author: "abdwhb-png",
-				GitHubRepository: "https://github.com/abdwhb-png/cliproxy-deployment",
+				Name: "JEV Provider", Version: "0.2.0", Author: "abdwhb-png",
+				GitHubRepository: "https://github.com/abdwhb-png/cliproxy-jev-provider",
 				ConfigFields: []pluginapi.ConfigField{{
 					Name: "endpoints", Type: pluginapi.ConfigFieldTypeObject,
 					Description: "Optional absolute System One endpoint overrides for typesafe, openrouter, and zen.",
 				}},
 			},
 			Capabilities: map[string]any{
-				"auth_provider": true, "model_provider": true, "executor": true,
+				"auth_provider": true, "model_provider": true, "executor": true, "management_api": true,
 				"executor_model_scope":    "oauth",
 				"executor_input_formats":  []string{"chat-completions"},
 				"executor_output_formats": []string{"chat-completions"},
@@ -99,6 +100,18 @@ func (p *jevPlugin) dispatch(method string, raw []byte) (any, error) {
 		}, nil
 	}
 	switch method {
+	case pluginabi.MethodManagementRegister:
+		var req pluginapi.ManagementRegistrationRequest
+		if err := json.Unmarshal(raw, &req); err != nil {
+			return nil, err
+		}
+		return p.registerTesterResources(req)
+	case pluginabi.MethodManagementHandle:
+		var req pluginapi.ManagementRequest
+		if err := json.Unmarshal(raw, &req); err != nil {
+			return nil, err
+		}
+		return p.serveTesterResource(req)
 	case pluginabi.MethodAuthIdentifier, pluginabi.MethodExecutorIdentifier:
 		return map[string]string{"identifier": "jev"}, nil
 	case pluginabi.MethodAuthParse:

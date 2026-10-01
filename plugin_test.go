@@ -12,7 +12,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/pluginapi"
 )
 
-func TestRegisterDeclaresOnlyCredentialBoundProviderCapabilities(t *testing.T) {
+func TestRegisterDeclaresProviderAndBrowserResourcesWithoutRouting(t *testing.T) {
 	p := &jevPlugin{}
 	raw, err := p.handle(pluginabi.MethodPluginRegister, []byte(`{"schema_version":6}`))
 	if err != nil {
@@ -26,8 +26,9 @@ func TestRegisterDeclaresOnlyCredentialBoundProviderCapabilities(t *testing.T) {
 		t.Fatalf("registration failed: %v", envelope.Error)
 	}
 	var registration struct {
-		SchemaVersion uint32         `json:"schema_version"`
-		Capabilities  map[string]any `json:"capabilities"`
+		SchemaVersion uint32             `json:"schema_version"`
+		Metadata      pluginapi.Metadata `json:"metadata"`
+		Capabilities  map[string]any     `json:"capabilities"`
 	}
 	if err := json.Unmarshal(envelope.Result, &registration); err != nil {
 		t.Fatal(err)
@@ -35,7 +36,10 @@ func TestRegisterDeclaresOnlyCredentialBoundProviderCapabilities(t *testing.T) {
 	if registration.SchemaVersion != pluginabi.SchemaVersion {
 		t.Fatalf("schema version = %d", registration.SchemaVersion)
 	}
-	for _, capability := range []string{"auth_provider", "model_provider", "executor"} {
+	if registration.Metadata.GitHubRepository != "https://github.com/abdwhb-png/cliproxy-jev-provider" {
+		t.Errorf("plugin repository = %q", registration.Metadata.GitHubRepository)
+	}
+	for _, capability := range []string{"auth_provider", "model_provider", "executor", "management_api"} {
 		if registration.Capabilities[capability] != true {
 			t.Errorf("missing capability %s", capability)
 		}

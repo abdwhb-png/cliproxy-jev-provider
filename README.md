@@ -1,6 +1,32 @@
 # JEV provider for CLIProxyAPI
 
-Adds native JEV decisions from TypeSafe, OpenRouter, and OpenCode Zen. CLIProxyAPI selects the credential and handles routing, priorities, retries, failover, and cooldowns. This plugin declares only auth-provider, model-provider, and executor capabilities. Each execution sends one request through `host.http.do` using the selected credential context.
+Adds native JEV decisions from TypeSafe, OpenRouter, and OpenCode Zen. CLIProxyAPI selects the credential and handles routing, priorities, retries, failover, and cooldowns. This plugin declares auth-provider, model-provider, executor, and management-resource capabilities. The management capability serves static tester assets only. Each decision execution sends one request through `host.http.do` using the selected credential context.
+
+## Repository and subtree workflow
+
+The plugin repository is `https://github.com/abdwhb-png/cliproxy-jev-provider`, matching this module's path and registration metadata. Its branch is `main`. `cliproxy-deployment` consumes it as a squashed Git subtree at `plugins/cliproxy-jev-provider/`; changing directories into that prefix still operates on the parent Git checkout. CLIProxyAPI is a separate Git submodule and must not use this workflow.
+
+Commit plugin source, tests, and this README in a commit limited to the prefix. Commit parent deployment configuration, instructions, and ADR/notes separately. After the intended plugin changes are committed and the worktree is clean, publish from the parent root with:
+
+```bash
+git subtree push --prefix=plugins/cliproxy-jev-provider \
+  https://github.com/abdwhb-png/cliproxy-jev-provider.git main
+```
+
+Verify the resulting remote branch before reporting success. Import updates with `git subtree pull --prefix=plugins/cliproxy-jev-provider https://github.com/abdwhb-png/cliproxy-jev-provider.git main --squash`, preserving local work and inspecting any divergence before pulling. Publication does not publish deployment files or activate a rebuilt runtime library. The relative SDK replacement assumes the deployment checkout layout: the plugin is under `plugins/` and the SDK is at root `CLIProxyAPI/`. Deployment-specific ADRs and qualification reports referenced below live in the private parent repository; they are not included in the plugin repository.
+
+## Browser decision testing
+
+Version `0.2.0` adds **JEV Decision Tester** to the WebUI's plugin navigation after an approved reload or restart. It also opens directly at `/v0/resource/plugins/cliproxy-jev-provider/tester` on the proxy's address. The page uses the same origin as the proxy; it supports the deployed WebUI served at `/management.html` without frontend or host source changes.
+
+1. Enter a **CLIProxyAPI client API key**, not the management password or an upstream provider key.
+2. Click **Load models / Refresh**. Available JEV aliases come from the authenticated `/v1/models` catalog, filtered by `owned_by: typesafe`. The current deployed host omits `type` and `supported_parameters`, so the page does not depend on those fields. Excluded or unavailable models are not invented by the tester.
+3. Load a synthetic `noul`, `choice`, `score`, or combined example, or paste your full native request. Examples prefer the available `jev-1.13-free` alias; edit `model` to select another available alias. Loading an example replaces the editor contents and does not submit a request.
+4. Click **Run decision**. Inspect HTTP status, elapsed time, and the complete native response. **Cancel** aborts the request; changing the client key also cancels pending work and clears the catalog.
+
+The client key lives only in page memory and is cleared on reload or navigation. The page writes neither credentials nor request history to browser storage and does not read the WebUI's saved login. Its static assets are public; model discovery and execution still require the normal client key. Requests are restricted to the same origin and responses are rendered as text.
+
+The browser checks JSON syntax and that `model` is an available JEV alias, then submits the editor text unchanged to `/v1/chat/completions`. Native schema validation stays in the existing executor; structured state, additional fields, duplicate-key errors, and large integers are not hidden by browser reserialization. The complete response is displayed unchanged, including native metadata and upstream error responses. The existing WebUI provider chat test remains unsuitable because it sends `messages` rather than decision JSON.
 
 ## Request contract
 
@@ -44,7 +70,7 @@ Pins use the `prefix` in the example credential files. Keep the host's `force-mo
 
 The shared paid alias follows the existing host scheduler (`fill-first` in this deployment). The free model is excluded from that alias. Standard auth metadata such as `priority`, `disabled`, and `excluded_models` is preserved for the host. No JEV-specific weighting rules are introduced. The host provider identity is `jev`; `jev_upstream` distinguishes the upstream vendor. Do not assume existing chat scheduler rules apply to this identity.
 
-JEV auth IDs and cooldowns are separate from OpenRouter/Zen chat IDs, even when they reference the same underlying API key. An upstream failure retains its HTTP status with a sanitized message; raw error bodies are not exposed. **RPC schema 6 cannot carry upstream error headers such as `Retry-After`.** The host therefore applies its default status-based retry/cooldown policy. This limitation is accepted in [ADR-0005](../../docs/adr/0005-auth-bound-jev-decision-plugin.md).
+JEV auth IDs and cooldowns are separate from OpenRouter/Zen chat IDs, even when they reference the same underlying API key. An upstream failure retains its HTTP status with a sanitized message; raw error bodies are not exposed. **RPC schema 6 cannot carry upstream error headers such as `Retry-After`.** The host therefore applies its default status-based retry/cooldown policy. This limitation is accepted in ADR-0005 (`docs/adr/0005-auth-bound-jev-decision-plugin.md` in the deployment repository).
 
 ## Credentials and configuration
 
@@ -85,17 +111,29 @@ make -C plugins/cliproxy-jev-provider build
 nm -D plugins/cliproxy-jev-provider/dist/cliproxy-jev-provider.so | rg 'cliproxy_plugin_init$'
 ```
 
-`test` exercises real RPC handlers; `race` covers concurrent execution/reconfiguration; `transport` builds the actual host and `.so`, then uses temporary auth/config files, fake keys, loopback upstreams, and a guard proxy. It covers all native IDs and aliases, host priorities, disabled/missing/invalid credentials, failover, cooldowns, cancellation, native-body preservation, usage accounting, and unrelated chat execution. It requires local socket access. Set `JEV_TEST_HOST_BINARY` only to a binary built from the current checkout to reuse a host build. Set `GOCACHE` to a writable location when needed.
+`test` exercises real RPC handlers; `race` covers concurrent execution/reconfiguration; `transport` builds the actual host and `.so`, then uses temporary auth/config files, fake keys, loopback upstreams, and a guard proxy. It covers all native IDs and aliases, resource routes, host priorities, disabled/missing/invalid credentials, failover, cooldowns, cancellation, native-body preservation, usage accounting, and unrelated chat execution. It requires local socket access. Set `JEV_TEST_HOST_BINARY` to reuse a host build; use the checkout's binary for source qualification and the deployed binary for compatibility qualification. Set `GOCACHE` to a writable location when needed.
+
+`browser` runs that same host fixture with an isolated `agent-browser` session. It requires an installed `agent-browser` CLI and supported Chrome/Chromium browser; no JavaScript package installation is needed. It exercises the served production page, invalid authentication, aliases, examples, validation failures, unchanged structured JSON and large integers, literal HTML-like response rendering, upstream errors, duplicate-submit prevention, cancellation, key-change cancellation, and clearing credentials on reload. `verify` includes browser verification, race, vet, and module verification. `transport` remains available for environments without browser tooling; it does not qualify the browser UI.
 
 The root Compose mount is read-only with `create_host_path: false`; build all three plugins before service startup. `dist/` is ignored. A source rebuild does not replace an already loaded native library.
+
+To prepare a candidate without replacing the mounted artifact, run `make build OUTPUT=dist/candidate/cliproxy-jev-provider.so`. Runtime promotion requires separate approval; preserve the config volume and ensure `RESET_CONFIG=0`. Updating this already active provider to `0.2.0` needs no credential or routing migration.
 
 ### Local verification record — 2026-09-30
 
 RPC tests, the full Go race suite, `go vet`, and `go mod verify` passed. The Linux amd64 native library built and exports `cliproxy_plugin_init`. The real host loopback passed, including an assertion that its configured proxy was used. Focused host tests for plugin HTTP-status preservation and auth-manager usage publication passed. Root template YAML and Compose mount validation passed. The CLIProxyAPI checkout has no new source changes.
 
-LSP diagnostics were not run because `gopls` is unavailable. Compiler and vet checks ran. Authenticated probes on 2026-09-30 passed for TypeSafe, both OpenRouter credentials, and Zen free, validating `noul`, `choice`, and `score`. Zen paid returned HTTP 402 with `Upstream request failed: Insufficient account funds` and remains unqualified. See the [probe report](../../docs/notes/jev-authenticated-provider-probes.md).
+LSP diagnostics were not run because `gopls` is unavailable. Compiler and vet checks ran. Authenticated probes on 2026-09-30 passed for TypeSafe, both OpenRouter credentials, and Zen free, validating `noul`, `choice`, and `score`. Zen paid returned HTTP 402 with `Upstream request failed: Insufficient account funds` and remains unqualified. See the probe report (`docs/notes/jev-authenticated-provider-probes.md` in the deployment repository).
 
-Approved runtime activation on 2026-09-30 passed live checks for all three qualified provider pins and the shared alias. All 133 original public model IDs remain, with five JEV aliases added. Paid Zen is excluded in its runtime auth record; usage statistics retain their previous disabled setting. See the [activation report](../../docs/notes/jev-runtime-activation.md), including the reset-flag recovery and remaining verification limits.
+Approved runtime activation on 2026-09-30 passed live checks for all three qualified provider pins and the shared alias. All 133 original public model IDs remain, with five JEV aliases added. Paid Zen is excluded in its runtime auth record; usage statistics retain their previous disabled setting. See the activation report (`docs/notes/jev-runtime-activation.md` in the deployment repository), including the reset-flag recovery and remaining verification limits.
+
+### Browser verification record — 2026-10-01
+
+Registration and resource RPC tests followed RED → GREEN. A real browser test first failed on missing page controls, then passed against the implemented page. Native host and browser checks passed both with the checked-out SDK host and with an isolated copy of the currently deployed host binary (`sha256:b7c8ddc9c18e25ad71287d5269ae908448049027a8c13e1bd86251f6cfc9c6f2` image).
+
+`make verify` passed: RPC tests, race detector, vet, native host/browser integration, and module verification. JavaScript syntax and Git diff checks passed. These isolated browser checks used synthetic requests, fake credentials, and guarded local upstreams. `gopls` is unavailable, so no LSP diagnostics ran.
+
+The user subsequently approved promotion of `0.2.0`. The live standalone tester passed authenticated model discovery and four browser decision requests: TypeSafe, OpenRouter, Zen free, and the shared alias, each with all three question types. The existing image, exact persisted configuration, and all 138 model IDs were preserved. Invalid authentication, frontend validation, credential clearing on reload, and a 390-pixel layout were also checked. Live navigation through the management menu remains unverified because the session has no plaintext management credential; the standalone tester is usable with the client API key. See the live browser report (`docs/notes/jev-browser-activation.md` in the deployment repository).
 
 ## Activation boundary
 
